@@ -2,7 +2,7 @@ local wezterm = require("wezterm")
 local config = wezterm.config_builder()
 
 -- Font
-config.font = wezterm.font("JetBrains Mono Regular")
+config.font = wezterm.font("FiraCode Nerd Font Mono")
 config.font_size = 12.5
 
 -- Colors
