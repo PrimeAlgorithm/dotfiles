@@ -33,12 +33,24 @@ vim.opt.relativenumber = true
 vim.opt.signcolumn = "yes"
 vim.opt.updatetime = 300
 
+-- Helper: create FileType autocmd to start an LSP
+local function start_on(ft_list, name, cfg)
+    vim.api.nvim_create_autocmd("FileType", {
+        pattern = ft_list,
+        callback = function(args)
+            local final = vim.tbl_deep_extend("force", {}, cfg or {}, { bufnr = args.buf, name = name })
+            vim.lsp.start(final)
+        end,
+    })
+end
+
 -- Declare plugins
 require("lazy").setup({
     -- Util libs
     { "nvim-lua/plenary.nvim" },
     { "nvim-tree/nvim-web-devicons" },
     { "MunifTanjim/nui.nvim" },
+
     -- Themes
     {
         "folke/tokyonight.nvim",
@@ -47,6 +59,7 @@ require("lazy").setup({
             vim.cmd.colorscheme("tokyonight")
         end,
     },
+
     -- Statusline
     {
         "nvim-lualine/lualine.nvim",
@@ -54,6 +67,7 @@ require("lazy").setup({
             require("lualine").setup({ options = { globalstatus = true } })
         end,
     },
+
     -- Tab-like bars for buffers
     {
         "akinsho/bufferline.nvim",
@@ -62,6 +76,7 @@ require("lazy").setup({
             require("bufferline").setup({})
         end,
     },
+
     -- File explorer
     {
         "nvim-neo-tree/neo-tree.nvim",
@@ -69,9 +84,7 @@ require("lazy").setup({
         dependencies = { "nvim-lua/plenary.nvim", "nvim-tree/nvim-web-devicons", "MunifTanjim/nui.nvim" },
         config = function()
             require("neo-tree").setup({
-                window = {
-                    width = 22,
-                },
+                window = { width = 22 },
                 file_system = {
                     filtered_items = {
                         visible = true,
@@ -83,7 +96,8 @@ require("lazy").setup({
             vim.keymap.set("n", "<leader>e", "<cmd>Neotree toggle<cr>", { desc = "File Explorer" })
         end,
     },
-    -- Fuzzy finding (files, grep, buffers, etc.)
+
+    -- Fuzzy finding
     {
         "nvim-telescope/telescope.nvim",
         branch = "0.1.x",
@@ -100,12 +114,14 @@ require("lazy").setup({
             vim.keymap.set("n", "<leader>fh", "<cmd>Telescope help_tags<cr>", { desc = "Help" })
         end,
     },
-    -- Native fast sorter for Telescope (builds with CMake)
+
+    -- Native sorter for Telescope (builds with CMake)
     {
         "nvim-telescope/telescope-fzf-native.nvim",
         build = "cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --config Release",
     },
-    -- Treesitter (better highlighting & code-aware movements)
+
+    -- Treesitter
     {
         "nvim-treesitter/nvim-treesitter",
         build = ":TSUpdate",
@@ -136,21 +152,26 @@ require("lazy").setup({
             })
         end,
     },
-    -- Auto-close/rename HTML tags (works with TSX too)
+
+    -- Auto-close/rename HTML tags
     {
         "windwp/nvim-ts-autotag",
         config = function()
             require("nvim-ts-autotag").setup()
         end,
     },
-    -- TypeScript/JavaScript LSP (better than plain tsserver)
-    { "yioneko/nvim-vtsls" }, -- uses the vtsls language server
-    -- Optional: Emmet abbreviations for HTML/CSS/JSX
+
+    -- TypeScript/JavaScript LSP (vtsls)
+    { "yioneko/nvim-vtsls" },
+
+    -- Optional: Emmet
     { "olrtg/emmet-language-server" },
-    -- LSP: install/manage servers (Mason) + connect them (lspconfig)
+
+    -- Mason (installer) + mason-lspconfig only for ensuring installs
     { "mason-org/mason.nvim", config = true },
     {
         "mason-org/mason-lspconfig.nvim",
+        -- keep lspconfig as a dependency for server metadata (but we won't require it in *your* code)
         dependencies = { "neovim/nvim-lspconfig" },
         config = function()
             require("mason-lspconfig").setup({
@@ -166,23 +187,56 @@ require("lazy").setup({
                     "vtsls",
                 },
             })
-            local lspconfig = require("lspconfig")
+
+            -- capabilities from nvim-cmp
             local capabilities = require("cmp_nvim_lsp").default_capabilities()
-            for _, server in ipairs({ "clangd", "pyright", "rust_analyzer" }) do
-                lspconfig[server].setup({ capabilities = capabilities })
-            end
-            -- ruff as a separate LSP for Python linting (optional)
-            pcall(function()
-                lspconfig.ruff.setup({ capabilities = capabilities })
-            end)
+
+            -- Define server configs using the new API
+            local cfg = vim.lsp.config -- alias, just for brevity
+
+            -- C / C++
+            cfg["clangd"] = {
+                cmd = { "clangd" },
+                capabilities = capabilities,
+            }
+            start_on({ "c", "cpp", "objc", "objcpp" }, "clangd", cfg["clangd"])
+
+            -- Python (pyright + ruff)
+            cfg["pyright"] = {
+                cmd = { "pyright-langserver", "--stdio" },
+                capabilities = capabilities,
+            }
+            start_on({ "python" }, "pyright", cfg["pyright"])
+
+            cfg["ruff"] = {
+                cmd = { "ruff", "server" },
+                capabilities = capabilities,
+            }
+            start_on({ "python" }, "ruff", cfg["ruff"])
+
+            -- Rust
+            cfg["rust_analyzer"] = {
+                cmd = { "rust-analyzer" },
+                capabilities = capabilities,
+            }
+            start_on({ "rust" }, "rust_analyzer", cfg["rust_analyzer"])
 
             -- HTML / CSS
-            lspconfig.html.setup({ capabilities = capabilities })
-            lspconfig.cssls.setup({ capabilities = capabilities })
-
-            -- Emmet (works in html, css, javascriptreact/typescriptreact, etc.)
-            lspconfig.emmet_language_server.setup({
+            cfg["html"] = {
+                cmd = { "vscode-html-language-server", "--stdio" },
                 capabilities = capabilities,
+            }
+            start_on({ "html" }, "html", cfg["html"])
+
+            cfg["cssls"] = {
+                cmd = { "vscode-css-language-server", "--stdio" },
+                capabilities = capabilities,
+            }
+            start_on({ "css", "scss", "less" }, "cssls", cfg["cssls"])
+
+            -- Emmet
+            cfg["emmet_language_server"] = {
+                cmd = { "emmet-language-server", "--stdio" },
                 filetypes = {
                     "html",
                     "css",
@@ -197,22 +251,53 @@ require("lazy").setup({
                     "svelte",
                     "astro",
                 },
-            })
+                capabilities = capabilities,
+            }
+            start_on(
+                {
+                    "html",
+                    "css",
+                    "sass",
+                    "scss",
+                    "less",
+                    "javascriptreact",
+                    "typescriptreact",
+                    "javascript",
+                    "typescript",
+                    "vue",
+                    "svelte",
+                    "astro",
+                },
+                "emmet_language_server",
+                cfg["emmet_language_server"]
+            )
 
-            -- ESLint (diagnostics + code actions/fixes)
-            lspconfig.eslint.setup({
+            -- ESLint
+            cfg["eslint"] = {
+                cmd = { "vscode-eslint-language-server", "--stdio" },
                 capabilities = capabilities,
                 settings = { workingDirectory = { mode = "auto" } },
-            })
+            }
+            start_on(
+                { "javascript", "javascriptreact", "typescript", "typescriptreact", "vue", "svelte" },
+                "eslint",
+                cfg["eslint"]
+            )
 
             -- TypeScript/JavaScript via vtsls
-            lspconfig.vtsls.setup({
+            cfg["vtsls"] = {
+                cmd = { "vtsls" },
                 capabilities = capabilities,
                 settings = {
                     typescript = { preferences = { importModuleSpecifier = "non-relative" } },
                     javascript = { preferences = { importModuleSpecifier = "non-relative" } },
                 },
-            })
+            }
+            start_on(
+                { "typescript", "typescriptreact", "tsx", "javascript", "javascriptreact", "jsx" },
+                "vtsls",
+                cfg["vtsls"]
+            )
 
             -- LSP keybinds
             local map = vim.keymap.set
@@ -226,7 +311,8 @@ require("lazy").setup({
             map("n", "]d", vim.diagnostic.goto_next, { desc = "Next diagnostic" })
         end,
     },
-    -- Autocomplete + snippets (with VSCode-like Tab behavior)
+
+    -- Autocomplete + snippets
     {
         "hrsh7th/nvim-cmp",
         dependencies = {
@@ -267,7 +353,7 @@ require("lazy").setup({
                         elseif has_words_before() then
                             cmp.complete()
                         else
-                            fallback() -- inserts a real Tab that respects softtabstop/expandtab
+                            fallback()
                         end
                     end, { "i", "s" }),
                     ["<S-Tab>"] = cmp.mapping(function(fallback)
@@ -289,13 +375,18 @@ require("lazy").setup({
             })
         end,
     },
+
+    -- nvim-lint (deduped)
     {
         "mfussenegger/nvim-lint",
         config = function()
             require("lint").linters_by_ft = {
                 python = { "ruff" },
-                -- If you install clang-tidy, you can enable:
-                -- c = { "clangtidy" }, cpp = { "clangtidy" },
+                javascript = { "eslint_d" },
+                javascriptreact = { "eslint_d" },
+                typescript = { "eslint_d" },
+                typescriptreact = { "eslint_d" },
+                -- c = { "clangtidy" }, cpp = { "clangtidy" }, -- if you install clang-tidy
             }
             vim.api.nvim_create_autocmd({ "BufWritePost", "InsertLeave" }, {
                 callback = function()
@@ -304,20 +395,23 @@ require("lazy").setup({
             })
         end,
     },
-    -- Git signs in the gutter
+
+    -- Git signs
     {
         "lewis6991/gitsigns.nvim",
         config = function()
             require("gitsigns").setup({})
         end,
     },
-    -- Helpful popups that show available keymaps
+
+    -- Which-key
     {
         "folke/which-key.nvim",
         config = function()
             require("which-key").setup({})
         end,
     },
+
     -- Integrated terminal
     {
         "akinsho/toggleterm.nvim",
@@ -330,8 +424,10 @@ require("lazy").setup({
             vim.keymap.set("n", "<leader>t", "<cmd>ToggleTerm<cr>", { desc = "Terminal" })
         end,
     },
+
     -- Indent guides
     { "lukas-reineke/indent-blankline.nvim", main = "ibl", opts = {} },
+
     -- Multiline comment
     {
         "numToStr/Comment.nvim",
@@ -350,7 +446,7 @@ require("lazy").setup({
                     cpp = { "clang_format" },
                     python = { "ruff_format" }, -- or "black"
                     rust = { "rustfmt" },
-                    lua = { "stylua" }, -- if you add stylua later
+                    lua = { "stylua" },
                     javascript = { "prettierd", "prettier", "biome" },
                     typescript = { "prettierd", "prettier", "biome" },
                     javascriptreact = { "prettierd", "prettier", "biome" },
@@ -363,19 +459,14 @@ require("lazy").setup({
                     markdown = { "prettierd", "prettier" },
                     yaml = { "prettierd", "prettier" },
                 },
-                -- Global defaults for specific formatters
                 formatters = {
                     clang_format = {
-                        -- Use 4-space indentation everywhere unless a project .clang-format overrides it
                         prepend_args = {
                             "-style",
                             "{BasedOnStyle: LLVM, IndentWidth: 4, TabWidth: 4, UseTab: Never}",
                         },
                     },
-                    -- Example for stylua if you enable Lua formatting:
-                    stylua = {
-                        prepend_args = { "--indent-type", "Spaces", "--indent-width", "4" },
-                    },
+                    stylua = { prepend_args = { "--indent-type", "Spaces", "--indent-width", "4" } },
                 },
                 format_on_save = { lsp_fallback = true },
             })
@@ -387,23 +478,8 @@ require("lazy").setup({
             vim.keymap.set("n", "<leader>f", "<cmd>Format<cr>", { desc = "Format buffer" })
         end,
     },
-    {
-        "mfussenegger/nvim-lint",
-        config = function()
-            require("lint").linters_by_ft = {
-                python = { "ruff" },
-                javascript = { "eslint_d" },
-                javascriptreact = { "eslint_d" },
-                typescript = { "eslint_d" },
-                typescriptreact = { "eslint_d" },
-            }
-            vim.api.nvim_create_autocmd({ "BufWritePost", "InsertLeave" }, {
-                callback = function()
-                    require("lint").try_lint()
-                end,
-            })
-        end,
-    },
+
+    -- Autopairs
     {
         "windwp/nvim-autopairs",
         event = "InsertEnter",
@@ -411,12 +487,11 @@ require("lazy").setup({
         config = function()
             local npairs = require("nvim-autopairs")
             npairs.setup({
-                check_ts = true, -- use Treesitter to be smarter about pairs
-                fast_wrap = {}, -- enables <M-e> to wrap existing text in pairs
+                check_ts = true,
+                fast_wrap = {},
                 disable_filetype = { "TelescopePrompt", "vim" },
             })
 
-            -- Integrate with nvim-cmp so pressing <CR> on a completion also inserts the right closing char
             local cmp_autopairs = require("nvim-autopairs.completion.cmp")
             local cmp = require("cmp")
             cmp.event:on("confirm_done", cmp_autopairs.on_confirm_done())
